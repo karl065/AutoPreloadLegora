@@ -3,9 +3,9 @@ import dotenv from 'dotenv';
 dotenv.config();
 import axios from 'axios';
 import Sitemapper from 'sitemapper';
-
 const app = express();
-const PORT = process.env;
+
+const { PORT } = process.env;
 
 const WP_URL = 'https://www.legoraconsulting.com.co/?jacab_cycle=1';
 const SITEMAP_URL = 'https://www.legoraconsulting.com.co/sitemap_index.xml';

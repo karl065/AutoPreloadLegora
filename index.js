@@ -1,7 +1,11 @@
-const express = require('express');
-const axios = require('axios');
-const Sitemapper = require('sitemapper');
+import express from 'express';
+import dotenv from 'dotenv';
+dotenv.config();
+import axios from 'axios';
+import Sitemapper from 'sitemapper';
 const app = express();
+
+const { PORT } = process.env;
 
 const WP_URL = 'https://www.legoraconsulting.com.co/?jacab_cycle=1';
 const SITEMAP_URL = 'https://www.legoraconsulting.com.co/sitemap_index.xml';
@@ -50,6 +54,6 @@ setInterval(
 	14 * 60 * 1000,
 );
 
-app.listen(process.env.PORT || 3000, () => {
-	console.log('servidor corriendo');
+app.listen(PORT, () => {
+	console.log('servidor corriendo en puerto: ', PORT);
 });

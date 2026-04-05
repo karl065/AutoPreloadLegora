@@ -42,7 +42,7 @@ app.get('/start-warmup', async (req, res) => {
 setInterval(
 	async () => {
 		const hora = new Date().getUTCHours() - 5; // Hora Colombia
-		if (hora >= 4 && hora < 22) {
+		if (hora >= 4 && hora < 23) {
 			try {
 				await axios.get(WP_URL);
 				console.log('Sincronización con WordPress exitosa.');

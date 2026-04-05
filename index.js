@@ -15,90 +15,107 @@ app.get('/keep-alive', (req, res) => {
 	res.send('JACAB_RENDER_ALIVE');
 });
 
-// Función Maestra de Calentamiento y Verificación
 async function runWarmup() {
-	console.log('🚀 [PASADA 1] Iniciando generación de Caché (MISS -> HIT)...');
-	const sitemapper = new Sitemapper({ url: SITEMAP_URL, timeout: 20000 });
+	console.log('🔍 Extrayendo URLs del Sitemap...');
+	const sitemapper = new Sitemapper({
+		url: SITEMAP_URL,
+		timeout: 30000, // Aumentamos a 30s por si el sitemap es grande
+		debug: false,
+	});
 
 	try {
 		const { sites } = await sitemapper.fetch();
+
 		if (!sites || sites.length === 0) {
-			console.error('🚫 No se encontraron URLs en el sitemap.');
+			console.error(
+				'🚫 ERROR: No se detectaron URLs. Revisa si el sitemap_index.xml es accesible.',
+			);
 			return;
 		}
 
-		// FASE 1: Generación
-		for (const url of sites) {
+		const totalSites = sites.length;
+		console.log(
+			`✅ SITEMAP DETECTADO: Se encontraron ${totalSites} URLs para procesar.`,
+		);
+
+		// --- PASADA 1: GENERACIÓN ---
+		console.log('🚀 [PASADA 1] Generando caché para todas las URLs...');
+		for (let i = 0; i < totalSites; i++) {
+			const url = sites[i];
 			try {
 				const separator = url.includes('?') ? '&' : '?';
 				await axios.get(`${url}${separator}jacab_cycle=1`);
-				console.log(`📡 Generando: ${url}`);
-				await new Promise((r) => setTimeout(r, 2000)); // Delay para no saturar 512MB
+				console.log(`[${i + 1}/${totalSites}] 📡 Generando: ${url}`);
+				await new Promise((r) => setTimeout(r, 2000));
 			} catch (e) {
-				console.error(`❌ Error generando: ${url}`);
+				console.error(`[${i + 1}/${totalSites}] ❌ Error generando: ${url}`);
 			}
 		}
 
-		console.log(
-			'✅ [PASADA 1] Finalizada. Iniciando [PASADA 2] de Verificación...',
-		);
-		await new Promise((r) => setTimeout(r, 5000)); // Pausa de 5s entre pasadas
+		console.log('✅ [PASADA 1] Finalizada. Pausa de 5s para estabilidad...');
+		await new Promise((r) => setTimeout(r, 5000));
 
-		// FASE 2: Verificación de HIT
-		for (const url of sites) {
+		// --- PASADA 2: VERIFICACIÓN ---
+		console.log('🚀 [PASADA 2] Verificando estado HIT de las URLs...');
+		for (let i = 0; i < totalSites; i++) {
+			const url = sites[i];
 			try {
 				const separator = url.includes('?') ? '&' : '?';
 				const res = await axios.get(`${url}${separator}jacab_cycle=1`);
-				const status = res.headers['x-litespeed-cache'] || 'Desconocido';
+				const status = res.headers['x-litespeed-cache'] || 'MISS/None';
 
 				if (status === 'hit') {
-					console.log(`✅ CONFIRMADO (HIT): ${url}`);
+					console.log(`[${i + 1}/${totalSites}] ✅ CONFIRMADO (HIT): ${url}`);
 				} else {
-					console.warn(`⚠️ REINTENTO (Sigue en MISS): ${url}`);
-					// Si sigue en miss, le damos un toque extra
+					console.warn(
+						`[${i + 1}/${totalSites}] ⚠️ REINTENTO (Status: ${status}): ${url}`,
+					);
 					await axios.get(`${url}${separator}jacab_cycle=1`);
 				}
 				await new Promise((r) => setTimeout(r, 1000));
 			} catch (e) {
-				console.error(`❌ Error verificando: ${url}`);
+				console.error(`[${i + 1}/${totalSites}] ❌ Error verificando: ${url}`);
 			}
 		}
-		console.log('🏁 Proceso de Doble Verificación completado.');
+		console.log(
+			`🏁 Proceso completado. Se procesaron ${totalSites} URLs en total.`,
+		);
 	} catch (err) {
-		console.error('🚫 Error crítico en el proceso de Warmup.');
+		console.error('🚫 Error crítico al obtener el sitemap:', err.message);
 	}
 }
 
 app.get('/start-warmup', (req, res) => {
-	res.send('Calentamiento de doble pasada iniciado...');
+	res.send(
+		'Calentamiento de doble pasada iniciado. Revisa los logs para el conteo de URLs.',
+	);
 	runWarmup();
 });
 
-// CICLO INTELIGENTE CADA 5 MINUTOS
+// CICLO CADA 5 MINUTOS
 setInterval(
 	async () => {
-		const hora = new Date().getUTCHours() - 5; // Hora Colombia
+		const hora = new Date().getUTCHours() - 5;
 		if (hora >= 4 && hora < 23) {
 			try {
-				console.log('--- [5 MIN] Verificando estado de la Home ---');
+				console.log('--- [VERIFICACIÓN 5 MIN] ---');
 				const response = await axios.get(`${WP_BASE_URL}?jacab_cycle=1&ping=1`);
 				const cacheStatus = response.headers['x-litespeed-cache'];
-
-				console.log(`Estado: ${cacheStatus || 'No detectado'}`);
+				console.log(`Estado Home: ${cacheStatus || 'MISS'}`);
 
 				if (cacheStatus !== 'hit') {
-					console.warn('⚠️ ALERTA: Caché perdida. Iniciando Doble Pasada...');
+					console.warn(
+						'⚠️ Caché de Home perdida. Iniciando Warmup completo...',
+					);
 					runWarmup();
-				} else {
-					console.log('✅ Home estable. No se requiere Warmup.');
 				}
 			} catch (e) {
-				console.log('Reintentando conexión con Legora...');
+				console.log('⚠️ No se pudo conectar con Legora para verificación.');
 			}
 		}
 	},
 	5 * 60 * 1000,
-); // 5 MINUTOS
+);
 
 app.listen(PORT, () =>
 	console.log(`Servidor JACAB Tech activo en puerto: ${PORT}`),

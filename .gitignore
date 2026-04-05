@@ -1,0 +1,85 @@
+### --- LOGS --- ###
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+### --- ARCHIVOS TEMPORALES / UTILES PERO NO PARA GIT --- ###
+bs-config.js
+estructura.txt
+fixImport.js
+generarEndpoins.js
+tmp
+*.tmp
+
+### --- NODE --- ###
+node_modules
+.env
+.env.local
+.env.*.local
+jsconfig.json
+
+### --- DIST / BUILD --- ###
+dist
+dist-ssr
+build
+out
+.Dist
+release
+
+### --- VITE --- ###
+*.local
+*.tsbuildinfo
+
+### --- REACT --- ###
+.cache
+*.map
+
+### --- FRONT EXTRA --- ###
+FRONT2
+
+### --- CAPACITOR / IONIC --- ###
+android/
+ios/
+*.keystore
+app-release.aab
+app-release.apk
+capacitor.config.json.backup
+
+### --- SOCKET.IO / WEBPACK --- ###
+.cache/
+.parcel-cache/
+.next/
+.svelte-kit/
+vite.config.ts.timestamp*
+vite.config.js.timestamp*
+
+### --- EDITORES --- ###
+.vscode/*
+.vscode
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+### --- PINEGROW --- ###
+.anima
+pinegrow.json
+_pgbackup
+_pginfo
+
+### --- SISTEMA / DEMÁS --- ###
+Thumbs.db
+desktop.ini
+
+.github
+estructura_proyecto.txt
+
+debug.log

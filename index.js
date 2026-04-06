@@ -7,113 +7,122 @@ import Sitemapper from 'sitemapper';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de URLs
 const WP_BASE_URL = 'https://www.legoraconsulting.com.co/';
 const SITEMAP_URL = `${WP_BASE_URL}sitemap_index.xml`;
+const UA_UNIVERSAL =
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-// SEMÁFORO: Evita que se ejecuten dos procesos al mismo tiempo
 let isWarmingUp = false;
 
-// 1. Endpoint para UptimeRobot (Mantiene el servicio despierto)
-app.get('/keep-alive', (req, res) => {
-	console.log('--- [PING] UptimeRobot detectado ---');
-	res.send('JACAB_RENDER_ALIVE');
-});
+const myManualHeaders = {
+	'User-Agent': UA_UNIVERSAL,
+	'X-LS-Guest-Mode': '0',
+	'X-LSCACHE': 'on',
+	Accept:
+		'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+	'Accept-Encoding': 'gzip, deflate, br',
+};
 
-// Función Maestra de Calentamiento (Doble Pasada)
+app.get('/keep-alive', (req, res) => res.send('JACAB_RENDER_ALIVE'));
+
 async function runWarmup() {
-	if (isWarmingUp) {
-		console.log('⚠️ Proceso omitido: Ya hay un calentamiento en curso.');
-		return;
-	}
-
+	if (isWarmingUp) return;
 	isWarmingUp = true;
-	console.log('🔍 [INICIO] Extrayendo URLs del Sitemap...');
 
-	const sitemapper = new Sitemapper({
-		url: SITEMAP_URL,
-		timeout: 30000,
-		debug: false,
-	});
+	const sitemapper = new Sitemapper({ url: SITEMAP_URL, timeout: 30000 });
 
 	try {
 		const { sites } = await sitemapper.fetch();
-
-		if (!sites || sites.length === 0) {
-			console.error('🚫 ERROR: No se detectaron URLs en el sitemap.');
-			return;
-		}
+		if (!sites || sites.length === 0) return;
 
 		const totalSites = sites.length;
-		console.log(`✅ SITEMAP OK: ${totalSites} URLs encontradas.`);
+		let pendingUrls = []; // Aquí acumulamos los errores
 
-		// --- PASADA 1: GENERACIÓN (MISS -> HIT) ---
-		console.log('🚀 [PASADA 1] Generando caché para todas las URLs...');
+		// --- PASADA 1: GENERACIÓN INICIAL ---
+		console.log(`🚀 [PASADA 1] Procesando ${totalSites} URLs...`);
 		for (let i = 0; i < totalSites; i++) {
 			const url = sites[i];
 			try {
-				const separator = url.includes('?') ? '&' : '?';
-				// Agregamos jacab_cycle para identificarnos ante WordPress
-				await axios.get(`${url}${separator}jacab_cycle=1`, { timeout: 15000 });
-				console.log(`[${i + 1}/${totalSites}] 📡 Generando: ${url}`);
-				await new Promise((r) => setTimeout(r, 2000)); // Respiro para RAM de 512MB
+				await axios.get(url, { headers: myManualHeaders, timeout: 30000 });
+				console.log(
+					`[${i + 1}/${totalSites}] 📡 OK: ${url.replace('https://www.', '')}`,
+				);
+				await new Promise((r) => setTimeout(r, 4000));
 			} catch (e) {
 				console.error(
-					`[${i + 1}/${totalSites}] ❌ Error en generación: ${url}`,
+					`[${i + 1}/${totalSites}] ❌ FALLO: ${url.replace('https://www.', '')}. Guardado para reintento.`,
 				);
+				pendingUrls.push(url); // Acumulamos el error
+			}
+		}
+
+		// --- PASADA 1.5: CORRECCIÓN DE ERRORES ACUMULADOS ---
+		let retryCount = 0;
+		const maxRetries = 2; // Intentamos limpiar la lista de errores hasta 2 veces
+
+		while (pendingUrls.length > 0 && retryCount < maxRetries) {
+			retryCount++;
+			console.log(
+				`🔄 [PASADA 1.${retryCount}] Reintentando ${pendingUrls.length} errores acumulados...`,
+			);
+
+			const urlsToRetry = [...pendingUrls];
+			pendingUrls = []; // Vaciamos para capturar nuevos fallos si ocurren
+
+			for (const url of urlsToRetry) {
+				try {
+					await axios.get(url, { headers: myManualHeaders, timeout: 30000 });
+					console.log(`✅ CORREGIDO: ${url.replace('https://www.', '')}`);
+					await new Promise((r) => setTimeout(r, 4000));
+				} catch (e) {
+					console.error(
+						`❌ SIGUE FALLANDO: ${url.replace('https://www.', '')}`,
+					);
+					pendingUrls.push(url); // Vuelve a la lista de errores
+				}
 			}
 		}
 
 		console.log(
-			'✅ [PASADA 1] Finalizada. Pausa de 5s para estabilizar LiteSpeed...',
+			'✅ Generación finalizada. Pausa de 5s antes de verificar HITS...',
 		);
 		await new Promise((r) => setTimeout(r, 5000));
 
-		// --- PASADA 2: VERIFICACIÓN (CONFIRMACIÓN DE HIT) ---
-		console.log('🚀 [PASADA 2] Verificando estado HIT de las URLs...');
+		// --- PASADA 2: VERIFICACIÓN FINAL ---
+		console.log('🚀 [PASADA 2] Verificando estado HIT final...');
 		for (let i = 0; i < totalSites; i++) {
 			const url = sites[i];
 			try {
-				const separator = url.includes('?') ? '&' : '?';
-				const res = await axios.get(`${url}${separator}jacab_cycle=1`, {
+				const res = await axios.get(url, {
+					headers: myManualHeaders,
 					timeout: 15000,
 				});
-				const status = res.headers['x-litespeed-cache'] || 'MISS/None';
-
-				if (status === 'hit') {
-					console.log(`[${i + 1}/${totalSites}] ✅ CONFIRMADO (HIT): ${url}`);
-				} else {
-					console.warn(
-						`[${i + 1}/${totalSites}] ⚠️ REINTENTO (Status: ${status}): ${url}`,
-					);
-					await axios.get(`${url}${separator}jacab_cycle=1`);
-				}
+				const cacheHeader = res.headers['x-litespeed-cache'];
+				console.log(
+					`[${i + 1}/${totalSites}] ${cacheHeader === 'hit' ? '🎯 [HIT]' : '⚡ [MISS]'} -> ${url.replace('https://www.', '')}`,
+				);
 				await new Promise((r) => setTimeout(r, 1000));
 			} catch (e) {
-				console.error(
-					`[${i + 1}/${totalSites}] ❌ Error en verificación: ${url}`,
-				);
+				console.error(`❌ Error verificación final: ${url}`);
 			}
 		}
-		console.log(`🏁 [FIN] Proceso completado. ${totalSites} URLs procesadas.`);
+		console.log('🏁 Proceso JACAB Tech completado.');
 	} catch (err) {
-		console.error('🚫 Error crítico en el proceso de Warmup:', err.message);
+		console.error('🚫 Error crítico:', err.message);
 	} finally {
-		isWarmingUp = false; // Liberamos el semáforo siempre
+		isWarmingUp = false;
 	}
 }
 
-// Endpoint manual para disparar el proceso
 app.get('/start-warmup', (req, res) => {
-	if (isWarmingUp) return res.send('Ya hay un proceso en curso.');
-	res.send('Calentamiento de doble pasada iniciado. Revisa los logs.');
+	if (isWarmingUp) return res.send('En curso...');
+	res.send('Iniciado...');
 	runWarmup();
 });
 
-// 2. CICLO INTELIGENTE CADA 5 MINUTOS (Horario Colombia)
+// Ciclo de verificación cada 5 minutos
 setInterval(
 	async () => {
-		// Forzamos la hora de Bogotá (UTC-5) para evitar desfases en Render
 		const bogotaTime = new Date().toLocaleString('en-US', {
 			timeZone: 'America/Bogota',
 			hour12: false,
@@ -121,47 +130,24 @@ setInterval(
 		const hora = parseInt(bogotaTime.split(', ')[1].split(':')[0]);
 
 		if (hora >= 4 && hora < 23) {
-			if (isWarmingUp) {
-				console.log(
-					`--- [${hora}:00] Verificación omitida: Warmup en curso ---`,
-				);
-				return;
-			}
-
+			if (isWarmingUp) return;
 			try {
-				console.log(`--- [VERIFICACIÓN ${hora}:00] ---`);
-				// El parámetro &ping=1 le indica al PHP que responda rápido
-				const response = await axios.get(
-					`${WP_BASE_URL}?jacab_cycle=1&ping=1`,
-					{ timeout: 10000 },
-				);
-				const cacheStatus = response.headers['x-litespeed-cache'];
-
-				console.log(`Estado Home: ${cacheStatus || 'MISS'}`);
-
-				if (cacheStatus !== 'hit') {
-					console.warn(
-						'⚠️ Caché de Home perdida. Iniciando Warmup automático...',
-					);
+				const response = await axios.get(WP_BASE_URL, {
+					headers: myManualHeaders,
+					timeout: 10000,
+				});
+				if (response.headers['x-litespeed-cache'] !== 'hit') {
+					console.warn('⚠️ Home en MISS. Iniciando Warmup...');
 					runWarmup();
-				} else {
-					console.log('✅ Home estable (HIT). No se requiere acción.');
 				}
 			} catch (e) {
-				console.log(
-					'⚠️ Error de conexión con Legora. El servidor podría estar saturado.',
-				);
+				console.log('⚠️ Error de conexión.');
 			}
-		} else {
-			console.log(
-				`🌙 Horario de descanso (${hora}:00). Render en modo ahorro.`,
-			);
 		}
 	},
 	5 * 60 * 1000,
-); // 5 MINUTOS
+);
 
-app.listen(PORT, () => {
-	console.log(`Servidor JACAB Tech activo en puerto: ${PORT}`);
-	console.log('Configuración: Doble Pasada / Semáforo / Timezone Bogotá');
-});
+app.listen(PORT, () =>
+	console.log(`Servidor JACAB Tech activo en puerto: ${PORT}`),
+);
